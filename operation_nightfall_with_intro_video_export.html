@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Operation Nightfall – Mini‑Game Demo (Start + About + Win UI)</title>
+<style>
+  :root{ --bg:#0b0f12; --gold:#f0c35a; --neon:#17ff9e; --red:#ff4a4a; }
+  html,body{margin:0;height:100%;background:var(--bg);color:#d9d9d9;font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Inter,Arial}
+  /* Keep a cinematic 16:9 playfield centered */
+  .wrap{position:fixed;inset:0;display:grid;place-items:center}
+  .stage{position:relative;aspect-ratio:16/9;width:min(96vw,150vh);box-shadow:0 0 0 1px #1c2229, 0 10px 40px rgba(0,0,0,.6);border-radius:16px;overflow:hidden}
+  canvas{position:absolute;inset:0;display:block}
+  #ui{position:absolute;inset:0;pointer-events:none}
+  .hud{position:absolute;inset:0;padding:18px;display:flex;justify-content:space-between;pointer-events:none}
+  .hud .left,.hud .right{display:flex;gap:12px;align-items:flex-start}
+  .chip{pointer-events:auto;border:1px solid #35414d;color:#e8d9a8;background:rgba(15,20,26,.35);backdrop-filter:blur(4px);padding:6px 10px;border-radius:999px;font-size:12px;letter-spacing:.14em;text-transform:uppercase}
+  .title{font-weight:700;color:var(--gold);}
+  .btn{pointer-events:auto;border:1px solid #394552;background:transparent;color:var(--gold);padding:6px 12px;border-radius:10px;cursor:pointer;transition:all .2s ease;font-weight:600}
+  .btn:hover{background:#192027}
+  .centerBanner{position:absolute;left:50%;top:10%;transform:translateX(-50%);text-align:center;pointer-events:none}
+  .centerBanner h1{margin:0;color:var(--gold);font-size:28px;letter-spacing:.18em}
+  .toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);font-size:12px;opacity:.85;color:#9fb3c9}
+  /* Start Overlay */
+  .overlay{position:absolute;inset:0;display:grid;place-items:center;background:linear-gradient(180deg,rgba(10,14,18,.86),rgba(10,14,18,.72));backdrop-filter:blur(2px);pointer-events:auto}
+  .card{border:1px solid #3a4653;background:rgba(20,26,33,.66);padding:22px;border-radius:14px;max-width:min(80%,720px);text-align:center}
+  .card h2{margin:0 0 8px;color:var(--gold);letter-spacing:.14em}
+  .row{display:flex;gap:10px;justify-content:center;margin-top:14px}
+  .modal{position:absolute;inset:auto 18px 18px auto;max-width:420px;border:1px solid #3a4653;background:rgba(20,26,33,.9);padding:16px;border-radius:12px;display:none}
+  .modal h3{margin:0 0 6px;color:var(--gold)}
+</style>
+
+<style>
+/* -------- Intro video overlay & global fade control -------- */
+body.game-hidden > *:not(#introOverlay){ 
+  opacity: 0 !important; 
+  pointer-events: none !important; 
+  transition: opacity .6s ease !important;
+}
+body.game-visible > *:not(#introOverlay){
+  opacity: 1 !important; 
+  pointer-events: auto !important;
+}
+
+/* Overlay covers the entire viewport */
+#introOverlay{
+  position: fixed; inset: 0;
+  display: grid; place-items: center;
+  background: #000;
+  opacity: 1;
+  transition: opacity .6s ease;
+  z-index: 99999;
+}
+#introOverlay.faded { opacity: 0; pointer-events: none; }
+
+#introVideo{
+  width: 100%; height: 100%; object-fit: cover;
+}
+
+/* Center Play button */
+#introPlayBtn{
+  position: absolute;
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .8rem 1.1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.35);
+  background: rgba(0,0,0,.45);
+  color: #fff; font: 600 16px/1.1 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  cursor: pointer;
+  user-select: none;
+}
+#introPlayBtn:hover{ background: rgba(0,0,0,.6); }
+
+/* Skip button (bottom-right) */
+#skipIntro{
+  position: absolute; right: 18px; bottom: 18px;
+  padding: .55rem .9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.3);
+  background: rgba(0,0,0,.45);
+  color: #fff;
+  cursor: pointer;
+}
+#skipIntro:hover{ background: rgba(0,0,0,.6); }
+</style>
+
+</head>
+<body class="game-hidden">
+  <div class="wrap">
+    <div class="stage" id="stage">
+      <!-- GPU background -->
+      <canvas id="bg"></canvas>
+      <!-- 2D gameplay canvas -->
+      <canvas id="game"></canvas>
+
+      <!-- UI Layer -->
+      <div id="ui">
+        <div class="hud">
+          <div class="left">
+            <div class="chip title">Operation Nightfall</div>
+            <div class="chip" id="sceneName">Idle</div>
+            <div class="chip" id="timer">04:00</div>
+          </div>
+          <div class="right">
+            <button class="btn" id="aboutBtn">About</button>
+            <button class="btn" id="retry" title="Restart mission">Retry</button>
+          </div>
+        </div>
+        <div class="centerBanner"><h1 id="banner">TAP START TO BEGIN</h1></div>
+        <div class="toast" id="toast">Self-test pending…</div>
+
+        <!-- START OVERLAY -->
+        <div class="overlay" id="startOverlay">
+          <div class="card">
+            <h2>OPERATION NIGHTFALL</h2>
+            <p style="opacity:.9">A compact spy mini‑game. Crack the code → navigate the laser grid → decrypt the vault. Beat the clock.</p>
+            <div class="row">
+              <button class="btn" id="startBtn">Start</button>
+              <button class="btn" id="openAbout">About</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ABOUT POPUP -->
+        <div class="modal" id="aboutModal">
+          <h3>About</h3>
+          <p style="opacity:.9;margin:0 0 10px">This demo uses a WebGL shader background and a 2D canvas gameplay layer. Solve three quick stages under a 4‑minute timer.</p>
+          <ul style="margin:0;padding-left:18px;opacity:.9">
+            <li>Code Infiltration: rotate letter wheels to match <b>JUP</b>.</li>
+            <li>Laser Grid Escape: draw a safe path to the exit.</li>
+            <li>Vault Decryption: align three ring gaps to the top.</li>
+          </ul>
+          <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" id="closeAbout">Close</button></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+<script>
+/********************************
+ * Canvas sizing & setup
+ ********************************/
+const stage = document.getElementById('stage');
+const bg = document.getElementById('bg');
+const game = document.getElementById('game');
+const ctx = game.getContext('2d');
+let W,H,PR = window.devicePixelRatio||1;
+function fit(){
+  const r = stage.getBoundingClientRect();
+  W = Math.floor(r.width*PR); H = Math.floor(r.height*PR);
+  for(const c of [bg,game]){ c.width=W; c.height=H; c.style.width=r.width+'px'; c.style.height=r.height+'px'; }
+  console.log('[fit] resized', {W,H,PR});
+}
+window.addEventListener('resize', ()=>{fit(); initGL(); runTests();});
+fit();
+
+/********************************
+ * WebGL shader background (no fwidth)
+ ********************************/
+let gl, prog, uniforms={};
+function initGL(){
+  gl = bg.getContext('webgl'); if(!gl){ console.error('[initGL] WebGL not supported'); return; }
+  console.log('[initGL] context ok');
+  const vs = `
+    attribute vec2 p; 
+    void main(){ gl_Position = vec4(p,0.0,1.0); }
+  `;
+  const fs = `
+    precision highp float; 
+    uniform vec2 uRes; 
+    uniform float uTime; 
+    uniform float uPulse; 
+    // Approx pixel size in UV (for AA)
+    float px(){ return 1.0/min(uRes.x,uRes.y); }
+    float vignette(vec2 uv){ uv*=1.0-uv; return pow(16.0*uv.x*uv.y, 0.25); }
+    // Grid without derivatives; soft AA via distance to nearest line
+    float gridAA(vec2 uv, float scale){
+      vec2 g = abs(fract(uv*scale)-0.5);
+      float d = min(g.x,g.y);
+      float t = 1.5*px();
+      return 1.0 - smoothstep(0.0, t, d);
+    }
+    void main(){
+      vec2 uv = gl_FragCoord.xy/uRes; 
+      vec2 c = uv-0.5; c.x *= uRes.x/uRes.y; 
+      float t = uTime*0.6; 
+      float g1 = gridAA(uv, 24.0);
+      float g2 = gridAA(uv+vec2(t*.02,-t*.015), 6.0);
+      float scan = 0.5 + 0.5*sin((uv.y*120.0)+t*8.0);
+      float rings = smoothstep(.48,.5, length(c)) + smoothstep(.28,.3, length(c));
+      vec3 base = vec3(0.03,0.05,0.07);
+      vec3 gold = vec3(1.0,0.84,0.45);
+      vec3 neon = vec3(0.1,1.0,0.7);
+      float glow = g2*.15 + g1*.05 + scan*.04 + rings*.06 + uPulse*.25;
+      vec3 col = base + gold*glow + neon*(0.06+0.04*sin(t*3.));
+      col *= vignette(uv);
+      gl_FragColor = vec4(col,1.0);
+    }`;
+  function compile(type,src){ const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s); if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){ console.error('[shader compile]', gl.getShaderInfoLog(s)); throw gl.getShaderInfoLog(s);} return s; }
+  function link(vsSrc,fsSrc){ const p=gl.createProgram(); gl.attachShader(p,compile(gl.VERTEX_SHADER,vsSrc)); gl.attachShader(p,compile(gl.FRAGMENT_SHADER,fsSrc)); gl.linkProgram(p); if(!gl.getProgramParameter(p,gl.LINK_STATUS)){ console.error('[program link]', gl.getProgramInfoLog(p)); throw gl.getProgramInfoLog(p);} return p; }
+  prog = link(vs,fs); gl.useProgram(prog);
+  const buff = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buff); gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog,'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+  uniforms.uRes = gl.getUniformLocation(prog,'uRes');
+  uniforms.uTime= gl.getUniformLocation(prog,'uTime');
+  uniforms.uPulse= gl.getUniformLocation(prog,'uPulse');
+  console.log('[initGL] shader ok');
+}
+initGL();
+
+/********************************
+ * Game state & UI wiring
+ ********************************/
+const sceneName = document.getElementById('sceneName');
+const banner = document.getElementById('banner');
+const timerEl = document.getElementById('timer');
+const retryBtn = document.getElementById('retry');
+const toast = document.getElementById('toast');
+const startOverlay = document.getElementById('startOverlay');
+const startBtn = document.getElementById('startBtn');
+const openAboutBtn = document.getElementById('openAbout');
+const aboutBtn = document.getElementById('aboutBtn');
+const aboutModal = document.getElementById('aboutModal');
+const closeAbout = document.getElementById('closeAbout');
+
+const SCENES = { IDLE:'Idle', CODE:'Code Infiltration', LASER:'Laser Grid', VAULT:'Vault Decryption', WIN:'Mission Complete' };
+let scene = SCENES.IDLE;
+let timeLeft = 4*60; // 4 minutes overall
+let lastT = performance.now();
+let pulse = 0; // shader pulse
+
+// CODE scene – target word
+const targetWord = ['J','U','P'];
+let wheels = [0,0,0].map(()=>Math.floor(Math.random()*26));
+let sel = 0; // selected wheel index (implicit by tap region)
+function wheelLetter(i){ return String.fromCharCode(65 + (wheels[i]%26+26)%26); }
+function checkCode(){ const word = wheels.map((_,i)=>wheelLetter(i)).join(''); console.log('[code] current', word); if(word===targetWord.join('')){ flash('ACCESS GRANTED', '#17ff9e'); setTimeout(()=>switchScene(SCENES.LASER), 650);} }
+function rotateWheel(dir){ wheels[sel]=(wheels[sel]+dir+26)%26; pulse=1.0; checkCode(); }
+
+// LASER scene
+let dragging=false; let path=[];
+const lasers=[
+  {a:[0.1,0.2], b:[0.9,0.8], speed:0.18},
+  {a:[0.1,0.8], b:[0.9,0.2], speed:0.23},
+  {a:[0.0,0.4], b:[0.6,0.4], speed:0.16},
+];
+const startPt={x:0.08,y:0.85}, goalPt={x:0.92,y:0.15};
+
+// VAULT scene – 3 concentric rings with gap markers
+let rings=[0,0,0];
+function vaultSolved(){
+  let ok=true; const target= -Math.PI/2; // up
+  for(let i=0;i<3;i++){
+    const ang = (rings[i])%(Math.PI*2); let diff = Math.abs(((ang-target+Math.PI*2)%(Math.PI*2)) - Math.PI);
+    if(diff>0.20) ok=false; // ~11.5° tolerance
+  }
+  console.log('[vault] solved?', ok);
+  return ok;
+}
+
+function switchScene(to){
+  console.log('[scene] ->', to);
+  scene = to; sceneName.textContent = to; banner.textContent =
+    to===SCENES.CODE ? 'ENTER ACCESS CODE' :
+    to===SCENES.LASER? 'LASER GRID ESCAPE' :
+    to===SCENES.VAULT? 'DECRYPT THE VAULT' :
+    to===SCENES.WIN ? 'MISSION COMPLETE' : 'TAP START TO BEGIN';
+  if(to===SCENES.LASER){ path=[]; dragging=false; }
+  if(to===SCENES.VAULT){ rings=[0,0,0]; }
+  if(to===SCENES.WIN){ pulse=1.0; showWinOverlay(); }
+}
+
+retryBtn.onclick = ()=>{ console.log('[ui] retry'); timeLeft=4*60; wheels=[0,0,0].map(()=>Math.floor(Math.random()*26)); sel=0; startOverlay.style.display='grid'; switchScene(SCENES.IDLE); };
+startBtn.onclick = ()=>{ console.log('[ui] start'); startOverlay.style.display='none'; timeLeft=4*60; switchScene(SCENES.CODE); };
+openAboutBtn.onclick = ()=>{ aboutModal.style.display='block'; };
+aboutBtn.onclick = ()=>{ aboutModal.style.display='block'; };
+closeAbout.onclick = ()=>{ aboutModal.style.display='none'; };
+
+/********************************
+ * Input handling (normalized)
+ ********************************/
+function norm(ev){ const r=game.getBoundingClientRect(); const x=(ev.touches?ev.touches[0].clientX:ev.clientX)-r.left; const y=(ev.touches?ev.touches[0].clientY:ev.clientY)-r.top; return {x:x/r.width, y:y/r.height}; }
+
+game.addEventListener('pointerdown',e=>{
+  const p=norm(e);
+  if(scene===SCENES.CODE){
+    const x=p.x; sel = (x<0.4)?0:(x<0.6)?1:2; // tap column selects wheel
+    rotateWheel(+1); // rotate on tap
+  } else if(scene===SCENES.LASER){ dragging=true; path=[{x:startPt.x,y:startPt.y}]; }
+  else if(scene===SCENES.VAULT){
+    const cx=0.5, cy=0.55; const dx=p.x-cx, dy=p.y-cy; const d=Math.hypot(dx,dy);
+    const idx = d<0.13?0 : d<0.22?1 : d<0.31?2 : -1; if(idx>=0){ rings[idx]+=Math.PI/12; if(vaultSolved()){ flash('DATA CORE UNLOCKED','#17ff9e'); setTimeout(()=>switchScene(SCENES.WIN),600);} }
+  }
+});
+
+game.addEventListener('pointermove',e=>{ if(scene!==SCENES.LASER||!dragging) return; const p=norm(e); path.push(p); });
+
+game.addEventListener('pointerup',()=>{ if(scene===SCENES.LASER){ dragging=false; validatePath(); }});
+
+function validatePath(){
+  if(scene!==SCENES.LASER) return;
+  const segs = lasers.map((L,i)=>{ const t=(performance.now()/1000)*L.speed; const off=(Math.sin(t+i)*0.15); return {ax:(L.a[0]+off), ay:L.a[1], bx:(L.b[0]-off), by:L.b[1]}; });
+  function distPointToSeg(px,py,ax,ay,bx,by){ const vx=bx-ax, vy=by-ay; const wx=px-ax, wy=py-ay; const c1=wx*vx+wy*vy; const c2=vx*vx+vy*vy; const tt=Math.max(0,Math.min(1,c1/c2)); const dx=ax+tt*vx-px, dy=ay+tt*vy-py; return Math.hypot(dx,dy); }
+  let ok=true; for(const pt of path){ for(const s of segs){ const d=distPointToSeg(pt.x,pt.y,s.ax,s.ay,s.bx,s.by); if(d<0.02){ ok=false; break; } } if(!ok) break; }
+  if(ok && path.length>2){ const end=path[path.length-1]; const dx=end.x-goalPt.x, dy=end.y-goalPt.y; if(Math.hypot(dx,dy)<0.05){ flash('CORRIDOR CLEARED','#17ff9e'); setTimeout(()=>switchScene(SCENES.VAULT),650); return; } }
+  console.warn('[laser] alarm');
+  flash('ALARM TRIGGERED', '#ff6666'); path=[];
+}
+
+/********************************
+ * Drawing helpers
+ ********************************/
+function drawText(s,x,y,size,align='center',color='#f0c35a',bold=true){
+  ctx.save(); ctx.textAlign=align; ctx.textBaseline='middle'; ctx.fillStyle=color; ctx.font=(bold?'700 ':'500 ')+size+'px Inter, Segoe UI, Roboto, Arial'; ctx.fillText(s,x,y); ctx.restore();
+}
+function flash(msg,color){ banner.textContent=msg; banner.style.color=color; setTimeout(()=>{ banner.textContent= scene; banner.style.color='var(--gold)'; },950); }
+
+/********************************
+ * Win Overlay (how players realize they won)
+ ********************************/
+function showWinOverlay(){
+  // Simple text cue; could be extended with QR/share
+  drawWin = true; winStamp = performance.now();
+  console.log('[win] Mission Complete');
+}
+let drawWin=false, winStamp=0;
+
+/********************************
+ * Main render loop
+ ********************************/
+function renderBG(t){ if(!gl) return; gl.viewport(0,0,bg.width,bg.height); gl.useProgram(prog); gl.uniform2f(uniforms.uRes, bg.width, bg.height); gl.uniform1f(uniforms.uTime, t/1000); gl.uniform1f(uniforms.uPulse, pulse); gl.drawArrays(gl.TRIANGLE_STRIP,0,4); pulse=Math.max(0,pulse-0.04); }
+
+function render(t){
+  const dt=(t-lastT)/1000; lastT=t; if(scene!==SCENES.WIN && scene!==SCENES.IDLE){ timeLeft=Math.max(0, timeLeft-dt); }
+  const m=Math.floor(timeLeft/60), s=Math.floor(timeLeft%60); timerEl.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+
+  renderBG(t);
+  ctx.clearRect(0,0,game.width,game.height);
+  ctx.save(); ctx.scale(PR,PR);
+
+  if(scene===SCENES.CODE){
+    const cx=stage.clientWidth*0.34, cy=stage.clientHeight*0.55; const r=80; const gap=150; const letters=26;
+    for(let i=0;i<3;i++){
+      const x=cx + (i-1)*gap; ctx.strokeStyle='#f0c35a'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(x,cy,r,0,Math.PI*2); ctx.stroke();
+      for(let k=0;k<letters;k++){ const a=(k/letters)*Math.PI*2; const ix=x+Math.cos(a)*r*0.82, iy=cy+Math.sin(a)*r*0.82; ctx.fillStyle='rgba(240,195,90,.12)'; ctx.fillRect(ix-1,iy-1,2,2); }
+      const L = wheelLetter(i); drawText(L, x, cy, 48, 'center', i===sel?'#17ff9e':'#f0c35a');
+      ctx.strokeStyle=i===sel?'#17ff9e':'#7a6b3f'; ctx.strokeRect(x-60,cy-60,120,120);
+    }
+    drawText('TARGET', stage.clientWidth*0.83, stage.clientHeight*0.50, 16,'center','#93ffc9',false);
+    drawText(targetWord.join(''), stage.clientWidth*0.83, stage.clientHeight*0.56, 36,'center','#93ffc9');
+  }
+  else if(scene===SCENES.LASER){
+    const pad=40, l=pad, tY=pad*1.4, w=stage.clientWidth-2*pad-200, h=stage.clientHeight-2*pad;
+    ctx.strokeStyle='#5a4c28'; ctx.strokeRect(l,tY,w,h);
+    ctx.fillStyle='#17ff9e'; const sx=l+startPt.x*w, sy=tY+startPt.y*h; ctx.beginPath(); ctx.arc(sx,sy,6,0,6.283); ctx.fill();
+    ctx.fillStyle='#f0c35a'; const gx=l+goalPt.x*w, gy=tY+goalPt.y*h; ctx.beginPath(); ctx.arc(gx,gy,7,0,6.283); ctx.fill(); ctx.strokeStyle='#f0c35a'; ctx.strokeRect(gx-10,gy-10,20,20);
+    const now=t/1000; ctx.lineWidth=3;
+    lasers.forEach((L,i)=>{
+      const off=Math.sin(now*L.speed + i)*0.15; const ax=l+(L.a[0]+off)*w, ay=tY+L.a[1]*h; const bx=l+(L.b[0]-off)*w, by=tY+L.b[1]*h;
+      const grad=ctx.createLinearGradient(ax,ay,bx,by); grad.addColorStop(0,'rgba(255,90,90,0.0)'); grad.addColorStop(.5,'rgba(255,90,90,.9)'); grad.addColorStop(1,'rgba(255,90,90,0.0)'); ctx.strokeStyle=grad; ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+    });
+    if(path.length){ ctx.strokeStyle='#e6cc80'; ctx.lineWidth=3; ctx.setLineDash([6,8]); ctx.beginPath(); const p0=path[0]; ctx.moveTo(l+p0.x*w, tY+p0.y*h); for(const p of path){ ctx.lineTo(l+p.x*w, tY+p.y*h); } ctx.stroke(); ctx.setLineDash([]); }
+    drawText('SECURITY SCANNING', stage.clientWidth-pad-100, tY+20, 14,'center','#f0c35a',false);
+  }
+  else if(scene===SCENES.VAULT){
+    const cx=stage.clientWidth*0.5, cy=stage.clientHeight*0.56; const R=[110,160,210];
+    for(let i=0;i<3;i++){
+      ctx.save(); ctx.translate(cx,cy); ctx.rotate(rings[i]);
+      ctx.strokeStyle='#f0c35a'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(0,0,R[i],0,Math.PI*2); ctx.stroke();
+      ctx.strokeStyle='#17ff9e'; ctx.lineWidth=5; ctx.beginPath(); ctx.arc(0,0,R[i],-0.2,0.2); ctx.stroke();
+      ctx.restore();
+    }
+    drawText('ALIGN GAPS TO UNLOCK', cx, cy-260, 18,'center','#93ffc9',false);
+    drawText('DATA CORE', cx, cy+260, 18,'center','#f0c35a');
+  }
+  else if(scene===SCENES.WIN){
+    drawText('MISSION COMPLETE', stage.clientWidth*0.5, stage.clientHeight*0.52, 44,'center','#f0c35a');
+    drawText('Tap RETRY or START for another run', stage.clientWidth*0.5, stage.clientHeight*0.60, 16,'center','#9fb3c9',false);
+  }
+
+  // Win overlay shimmer for 2 seconds
+  if(drawWin){
+    const a = Math.min(1, (performance.now()-winStamp)/2000);
+    ctx.globalAlpha = 1-a*0.7;
+    drawText('MISSION COMPLETE', stage.clientWidth*0.5, stage.clientHeight*0.35, 52,'center','#ffe6a3');
+    ctx.globalAlpha = 1;
+    if(a>=1) drawWin=false;
+  }
+
+  ctx.restore();
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+/********************************
+ * Self‑tests (tiny diagnostics)
+ ********************************/
+function runTests(){
+  const webglOk = !!bg.getContext('webgl');
+  const shaderOk = !!gl && !!prog;
+  const msg = `Self‑test: WebGL ${webglOk?'\u2713':'\u2717'} • Shader ${shaderOk?'\u2713':'\u2717'} • Click/tap to play`;
+  toast.textContent = msg; console.log('[test]', {webglOk, shaderOk});
+}
+runTests();
+</script>
+
+<!-- ===== Intro Video Overlay (click to play) ===== -->
+<div id="introOverlay" aria-hidden="false">
+  <video id="introVideo" preload="auto" playsinline webkit-playsinline muted>
+    <source src="intro.mp4.mp4" type="video/mp4">
+  </video>
+  <button id="introPlayBtn" aria-label="Play intro">▶ Play</button>
+  <button id="skipIntro" aria-label="Skip intro">Skip</button>
+</div>
+
+<script>
+(function(){
+  // Start with the game hidden
+  document.addEventListener('DOMContentLoaded', function(){
+    document.body.classList.add('game-hidden');
+  });
+
+  const overlay = document.getElementById('introOverlay');
+  const video   = document.getElementById('introVideo');
+  const playBtn = document.getElementById('introPlayBtn');
+  const skipBtn = document.getElementById('skipIntro');
+
+  // Try to ensure video starts from 0 each time
+  function resetVideo(){
+    try { video.pause(); } catch(_) {}
+    try { video.currentTime = 0; } catch(_) {}
+  }
+
+  function revealGame(){
+    overlay.classList.add('faded');
+    // after fade, mark game visible and remove the overlay from flow
+    setTimeout(function(){
+      document.body.classList.remove('game-hidden');
+      document.body.classList.add('game-visible');
+      overlay.style.display = 'none';
+    }, 620);
+  }
+
+  // Click-to-play logic (with sound if policy allows)
+  playBtn.addEventListener('click', async function(){
+    resetVideo();
+    // Unmute so the user-gesture should allow audio
+    video.muted = false;
+    try{
+      await video.play();
+      playBtn.style.display = 'none';
+    }catch(e){
+      // If autoplay w/ sound fails, keep it muted and try again
+      console.warn('Play with audio failed, retry muted...', e);
+      video.muted = true;
+      try{
+        await video.play();
+        playBtn.style.display = 'none';
+      }catch(err){
+        console.warn('Even muted playback failed. User must try again.', err);
+      }
+    }
+  });
+
+  // Skip
+  skipBtn.addEventListener('click', function(){
+    resetVideo();
+    revealGame();
+  });
+
+  // When intro finishes, reveal the game
+  video.addEventListener('ended', revealGame);
+
+  // Safety: if the video errors, reveal game
+  video.addEventListener('error', function(){ revealGame(); });
+})();
+</script>
+
+</body>
+</html>
